@@ -12,4 +12,10 @@ public class DynexLoginRequest
 
     [JsonProperty("agent")]
     public string UserAgent { get; set; }
+
+    [JsonProperty("mallob_id")]
+    public string MallobId { get; set; }
+
+    [JsonProperty("algo")]
+    public string Algo { get; set; }
 }

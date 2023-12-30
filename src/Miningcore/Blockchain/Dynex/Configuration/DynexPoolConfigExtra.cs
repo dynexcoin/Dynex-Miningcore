@@ -6,11 +6,6 @@ namespace Miningcore.Blockchain.Dynex.Configuration;
 public class DynexPoolConfigExtra
 {
     /// <summary>
-    /// Dynex UUID for the pool
-    /// </summary>
-    public string UUID { get; set; }
-
-    /// <summary>
     /// Blocktemplate stream published via ZMQ
     /// </summary>
     public ZmqPubSubEndpointConfig BtStream { get; set; }

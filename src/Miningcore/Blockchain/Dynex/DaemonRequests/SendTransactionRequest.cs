@@ -17,7 +17,7 @@ public class SendTransactionRequest
     /// Privacy level (a discrete number from 1 to infinity). Level 5 is recommended
     /// </summary>
     [JsonProperty("anonymity")]
-    public uint Anonymity { get; set; } = 5;
+    public uint Anonymity { get; set; } = 0;
     
     /// <summary>
     /// Transaction fee. The fee in Dynex is fixed at .001 DNX. This parameter should be specified in minimal available DNX units. For example, if your fee is .001 CCX, you should pass it as 1000000
