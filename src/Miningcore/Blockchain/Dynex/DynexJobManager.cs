@@ -153,7 +153,7 @@ public class DynexJobManager : JobManagerBase<DynexJob>
     private async Task ShowDaemonSyncProgressAsync(CancellationToken ct)
     {
         var info = await restClient.Get<GetInfoResponse>(DynexConstants.DaemonRpcGetInfoLocation, ct);
-        
+
         if(info.Status != "OK")
         {
             var lowestHeight = info.Height;
@@ -171,7 +171,7 @@ public class DynexJobManager : JobManagerBase<DynexJob>
         {
             var coin = poolConfig.Template.As<DynexCoinTemplate>();
             var info = await restClient.Get<GetInfoResponse>(DynexConstants.DaemonRpcGetInfoLocation, ct);
-            
+
             if(info.Status != "OK")
                 logger.Warn(() => $"Error(s) refreshing network stats...");
 
@@ -220,9 +220,9 @@ public class DynexJobManager : JobManagerBase<DynexJob>
         clusterConfig = cc;
         extraPoolConfig = pc.Extra.SafeExtensionDataAs<DynexPoolConfigExtra>();
         coin = pc.Template.As<DynexCoinTemplate>();
-        
+
         var NetworkTypeOverride = !string.IsNullOrEmpty(extraPoolConfig?.NetworkTypeOverride) ? extraPoolConfig.NetworkTypeOverride : "testnet";
-        
+
         switch(NetworkTypeOverride.ToLower())
         {
             case "mainnet":
@@ -234,7 +234,7 @@ public class DynexJobManager : JobManagerBase<DynexJob>
             default:
                 throw new PoolStartupException($"Unsupport net type '{NetworkTypeOverride}'", poolConfig.Id);
         }
-        
+
         // extract standard daemon endpoints
         daemonEndpoints = pc.Daemons
             .Where(x => string.IsNullOrEmpty(x.Category))
@@ -330,7 +330,7 @@ public class DynexJobManager : JobManagerBase<DynexJob>
     {
         string workerName = string.IsNullOrEmpty(worker) ? DefaultWorkerName : worker;
 
-        if (minerWorkerShareCounts.ContainsKey(miner) && minerWorkerShareCounts[miner].ContainsKey(workerName)) 
+        if (minerWorkerShareCounts.ContainsKey(miner) && minerWorkerShareCounts[miner].ContainsKey(workerName))
         {
             var minerShares = minerWorkerShareCounts[miner][workerName];
 
@@ -339,13 +339,56 @@ public class DynexJobManager : JobManagerBase<DynexJob>
             int totalShareCount = minerShares.Sum(share => share.shareCount);
             double totalDifficulty = minerShares.Sum(share => share.difficulty);
             double averageDifficulty = totalDifficulty / totalShareCount;
-            double hashrate = totalShareCount / timeDurationInSeconds;
-            hashrate = hashrate * (averageDifficulty);
+            double hashrate = totalShareCount / timeDurationInSeconds * averageDifficulty;
             return hashrate;
         }
 
         return 0.0;
     }
+
+    public async ValueTask<string> SubmitMallobAsync(StratumConnection worker, DynexMallobRequest request, CancellationToken ct)
+    {
+        Contract.RequiresNonNull(worker);
+        Contract.RequiresNonNull(request);
+
+        var context = worker.ContextAs<DynexWorkerContext>();
+
+        var toMallob = new List<string>()
+        {
+            context.Mallob,
+            request.Payload,
+            worker.RemoteEndpoint.Address.ToString(),
+            context.Miner,
+            context.Worker,
+            "false",
+            context.Difficulty.ToString(),
+        };
+
+        using (var httpClient = new HttpClient())
+        {
+            var apiUrl = "http://" + poolserviceDaemonEndpoints.First().Host.ToString() + ":" + poolserviceDaemonEndpoints.First().Port.ToString() + "/json_rpc";
+
+            var payload = new
+            {
+                jsonrpc = "2.0",
+                method = "mallob",
+                @params = toMallob,
+                id = context.requestId
+            };
+
+            var jsonPayload = Newtonsoft.Json.JsonConvert.SerializeObject(payload);
+            var content = new StringContent(jsonPayload, System.Text.Encoding.UTF8, "application/json");
+
+            using HttpResponseMessage response = await httpClient.PostAsync(apiUrl, content);
+            var responseBody = await response.Content.ReadAsStringAsync();
+            JObject jsonObject = JObject.Parse(responseBody);
+
+            HandleError(jsonObject);
+            jsonObject.Value<string>("result");
+            return jsonObject["result"]?.Value<string>() ?? default;
+        }
+    }
+
 
     public async ValueTask<Share> SubmitShareAsync(StratumConnection worker,
         DynexSubmitShareRequest request, DynexWorkerJob workerJob, CancellationToken ct)
@@ -355,67 +398,51 @@ public class DynexJobManager : JobManagerBase<DynexJob>
 
         var context = worker.ContextAs<DynexWorkerContext>();
         var job = currentJob;
-        string Mallob = request.Mallob;
+        string mallob = context.Mallob;
         double hashrate = CalculateHashrateForMiner(context.Miner, context.Worker);
         hashrate = Math.Floor(hashrate);
-        string UUID = null;
-        if(!string.IsNullOrEmpty(extraPoolConfig?.UUID))
-        {
-            UUID = extraPoolConfig.UUID;
-        }
 
         //Run through to get info for poolservice, also basic checks for invalid shares.
         var (convertedBlob, found_hash, shareDiff, stratumDifficulty, pouw_data, algo, blobHex) = job.PreProcessShare(request.Nonce, workerJob.ExtraNonce, request, worker);
 
         var toValidate = new List<string>()
         {
-            request.Mallob,
+            mallob,
             context.Miner,
+            context.Worker,
             convertedBlob.ToHexString(),
             found_hash,
             shareDiff.ToString(),
             job.BlockTemplate.Difficulty.ToString(),
             job.BlockTemplate.Height.ToString(),
-            hashrate.ToString(),
-            UUID,
+            stratumDifficulty.ToString(),
             pouw_data
         };
 
-        var apiUrl = "http://" + poolserviceDaemonEndpoints.First().Host.ToString() + ":" + poolserviceDaemonEndpoints.First().Port.ToString() + "/validate224";
+        var apiUrl = "http://" + poolserviceDaemonEndpoints.First().Host.ToString() + ":" + poolserviceDaemonEndpoints.First().Port.ToString() + "/json_rpc";
 
-        if (algo == "dynexsolve230") {
-            using (var httpClient = new HttpClient())
+        using (var httpClient = new HttpClient())
+        {
+            var payload = new
             {
-                var payload = new
-                {
-                    jsonrpc = "2.0",
-                    method = "validate224",
-                    @params = toValidate,
-                    id = context.requestId
-                };
+                jsonrpc = "2.0",
+                method = "validate",
+                @params = toValidate,
+                id = context.requestId
+            };
 
-                var jsonPayload = Newtonsoft.Json.JsonConvert.SerializeObject(payload);
-                var content = new StringContent(jsonPayload, System.Text.Encoding.UTF8, "application/json");
+            var jsonPayload = Newtonsoft.Json.JsonConvert.SerializeObject(payload);
+            var content = new StringContent(jsonPayload, System.Text.Encoding.UTF8, "application/json");
 
-                using HttpResponseMessage response = await httpClient.PostAsync(apiUrl, content);
-                string responseBody = await response.Content.ReadAsStringAsync();
-                JObject jsonObject = JObject.Parse(responseBody);
-                int resultValue = jsonObject.Value<int>("result");
+            using var response = await httpClient.PostAsync(apiUrl, content);
+            var responseBody = await response.Content.ReadAsStringAsync();
+            JObject jsonObject = JObject.Parse(responseBody);
 
-                if (resultValue == 414) // Compare to 414 specifically
-                   throw new StratumException(StratumError.MinusOne, "414 Mallob verification failed");
+            HandleError(jsonObject);
+            int resultValue = jsonObject["result"]?.Value<int>() ?? default;
 
-                if (resultValue == 499) // Compare to 414 specifically
-                   throw new StratumException(StratumError.MinusOne, "499 Checkhash Failed");
-
-                if (resultValue == 500) // Compare to 414 specifically
-                   throw new StratumException(StratumError.MinusOne, "500 POUW data verification failed");
-
-                if (resultValue != 200) // Compare to 200 specifically
-                   throw new StratumException(StratumError.MinusOne, "Invalid data");
-            }
-        } else {
-            throw new StratumException(StratumError.MinusOne, "Incorrect DynexSolve Algorithm");
+            if (resultValue != 200)
+                throw new StratumException(StratumError.Other, "Invalid data");
         }
 
         //resume normal MC operations
@@ -436,7 +463,7 @@ public class DynexJobManager : JobManagerBase<DynexJob>
         {
             logger.Info(() => $"Submitting block {share.BlockHeight} [{share.BlockHash[..6]}]");
 
-            share.IsBlockCandidate = await SubmitBlockAsync(share, blobHex2, Mallob, share.BlockHash);
+            share.IsBlockCandidate = await SubmitBlockAsync(share, blobHex2, mallob, share.BlockHash);
 
             if(share.IsBlockCandidate)
             {
@@ -481,6 +508,20 @@ public class DynexJobManager : JobManagerBase<DynexJob>
 
     #endregion // API-Surface
 
+    private static void HandleError(JObject jsonObject)
+    {
+        if (jsonObject["error"] != null && jsonObject["error"].HasValues) 
+        {
+            var errorToken = jsonObject["error"];
+            if (errorToken != null)
+            {
+                var errorCode = errorToken["code"]?.Value<int>() ?? -1;
+                var errorMessage = errorToken["message"]?.Value<string>() ?? "Unknown error";
+                throw new StratumException(StratumError.Other, $"{errorCode} {errorMessage}");
+            }
+        }
+    }
+
     private static JToken GetFrameAsJToken(byte[] frame)
     {
         var text = Encoding.UTF8.GetString(frame);
@@ -501,7 +542,7 @@ public class DynexJobManager : JobManagerBase<DynexJob>
     protected override void ConfigureDaemons()
     {
         var jsonSerializerSettings = ctx.Resolve<JsonSerializerSettings>();
-        
+
         restClient = new SimpleRestClient(httpClientFactory, "http://" + daemonEndpoints.First().Host.ToString() + ":" + daemonEndpoints.First().Port.ToString() + "/");
         rpc = new RpcClient(daemonEndpoints.First(), jsonSerializerSettings, messageBus, poolConfig.Id);
 
@@ -517,7 +558,7 @@ public class DynexJobManager : JobManagerBase<DynexJob>
     protected override async Task<bool> AreDaemonsHealthyAsync(CancellationToken ct)
     {
         logger.Debug(() => "Checking if dynexd daemon is healthy...");
-        
+
         // test daemons
         try
         {
@@ -530,17 +571,17 @@ public class DynexJobManager : JobManagerBase<DynexJob>
 
             logger.Debug(() => $"{response?.Status} - Incoming: {response?.IncomingConnectionsCount} - Outgoing: {response?.OutgoingConnectionsCount})");
         }
-        
+
         catch(Exception)
         {
             logger.Debug(() => $"dynexd daemon does not seem to be running...");
             return false;
         }
-        
+
         if(clusterConfig.PaymentProcessing?.Enabled == true && poolConfig.PaymentProcessing?.Enabled == true)
         {
             logger.Debug(() => "Checking if walletd daemon is healthy...");
-            
+
             // test wallet daemons
             var request2 = new GetBalanceRequest
             {
@@ -548,7 +589,7 @@ public class DynexJobManager : JobManagerBase<DynexJob>
             };
 
             var response2 = await walletRpc.ExecuteAsync<GetBalanceResponse>(logger, DynexWalletCommands.GetBalance, ct, request2);
-            
+
             if(response2.Error != null)
                 logger.Debug(() => $"walletd daemon response: {response2.Error.Message} (Code {response2.Error.Code})");
 
@@ -561,7 +602,7 @@ public class DynexJobManager : JobManagerBase<DynexJob>
     protected override async Task<bool> AreDaemonsConnectedAsync(CancellationToken ct)
     {
         logger.Debug(() => "Checking if dynexd daemon is connected...");
-        
+
         try
         {
             var response = await restClient.Get<GetInfoResponse>(DynexConstants.DaemonRpcGetInfoLocation, ct);
@@ -575,7 +616,7 @@ public class DynexJobManager : JobManagerBase<DynexJob>
             return response?.Status == "OK" &&
                 (response?.OutgoingConnectionsCount + response?.IncomingConnectionsCount) > 0;
         }
-        
+
         catch(Exception)
         {
             logger.Debug(() => $"dynexd daemon does not seem to be running...");
@@ -586,7 +627,7 @@ public class DynexJobManager : JobManagerBase<DynexJob>
     protected override async Task EnsureDaemonsSynchedAsync(CancellationToken ct)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
-        
+
         logger.Debug(() => "Checking if dynexd daemon is synched...");
 
         var syncPendingNotificationShown = false;
@@ -601,7 +642,7 @@ public class DynexJobManager : JobManagerBase<DynexJob>
 
             var response = await rpc.ExecuteAsync<GetBlockTemplateResponse>(logger,
                 DynexCommands.GetBlockTemplate, ct, request);
-            
+
             if(response.Error != null)
                 logger.Debug(() => $"dynexd daemon response: {response.Error.Message} (Code {response.Error.Code})");
 
@@ -629,21 +670,21 @@ public class DynexJobManager : JobManagerBase<DynexJob>
 
         // coin config
         var coin = poolConfig.Template.As<DynexCoinTemplate>();
-        
+
         try
         {
             var infoResponse = await restClient.Get<GetInfoResponse>(DynexConstants.DaemonRpcGetInfoLocation, ct);
-        
+
             if(infoResponse?.Status != "OK")
                 throw new PoolStartupException($"Init RPC failed...", poolConfig.Id);
         }
-        
+
         catch(Exception)
         {
             logger.Debug(() => $"dynexd daemon does not seem to be running...");
             throw new PoolStartupException($"Init RPC failed...", poolConfig.Id);
         }
-        
+
         // address validation
         poolAddressBase58Prefix = CryptonoteBindings.DecodeAddress(poolConfig.Address);
         if(poolAddressBase58Prefix == 0)
@@ -665,7 +706,7 @@ public class DynexJobManager : JobManagerBase<DynexJob>
                 if(poolAddressBase58Prefix != coin.AddressPrefix)
                     throw new PoolStartupException($"Invalid pool address prefix. Expected {coin.AddressPrefix}, got {poolAddressBase58Prefix}", poolConfig.Id);
                 break;
-            
+
             case DynexNetworkType.Test:
                 if(poolAddressBase58Prefix != coin.AddressPrefixTestnet)
                     throw new PoolStartupException($"Invalid pool address prefix. Expected {coin.AddressPrefixTestnet}, got {poolAddressBase58Prefix}", poolConfig.Id);

@@ -23,6 +23,11 @@ public class DynexStratumMethods
     public const string Submit = "submit";
 
     /// <summary>
+    /// Submit share request
+    /// </summary>
+    public const string Mallob = "mallob";
+
+    /// <summary>
     /// Keep alive request
     /// </summary>
     public const string KeepAlive = "keepalived";

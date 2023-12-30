@@ -106,7 +106,8 @@ public class DynexJob
         target = EncodeTarget(workerJob.Difficulty);
     }
 
-    public (byte[] convertedBlob, string found_hash, double shareDiff, double stratumDifficulty, string pouw_data, string algo, string BlobHex) PreProcessShare(string nonce, uint workerExtraNonce, DynexSubmitShareRequest workerHash, StratumConnection worker)
+    public (byte[] convertedBlob, string found_hash, double shareDiff, double stratumDifficulty, string pouw_data, string algo, string BlobHex) 
+        PreProcessShare(string nonce, uint workerExtraNonce, DynexSubmitShareRequest workerHash, StratumConnection worker)
     {
         Contract.Requires<ArgumentException>(!string.IsNullOrEmpty(nonce));
         Contract.Requires<ArgumentException>(!string.IsNullOrEmpty(workerHash.Result));
@@ -133,14 +134,11 @@ public class DynexJob
 
         // extract values
         string found_hash = workerHash.Result;
-        string algo = workerHash.Algorithm;
-        string mallob = workerHash.Mallob;
+        string algo = context.Algo;
+        string mallob = context.Mallob;
         string pouw_data = workerHash.PouwData;
         byte[] hashBytes = Hex.Decode(found_hash);
         BigInteger hashBigInt = new BigInteger(hashBytes);
-
-        if(algo != "dynexsolve224final" && algo != "dynexsolve230")
-           throw new StratumException(StratumError.MinusOne, "Incorrect algo");
 
         // check difficulty
         var headerValue = new System.Numerics.BigInteger(hashBigInt.ToByteArray());
@@ -192,8 +190,8 @@ public class DynexJob
 
         // extract values
         string found_hash = workerHash.Result;
-        string algo = workerHash.Algorithm;
-        string mallob = workerHash.Mallob;
+        string algo = context.Algo;
+        string mallob = context.Mallob;
         string pouw_data = workerHash.PouwData;
         byte[] hashBytes = Hex.Decode(found_hash);
         BigInteger hashBigInt = new BigInteger(hashBytes);

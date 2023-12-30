@@ -1,6 +1,0 @@
-namespace Miningcore.Blockchain.Dynex.DaemonResponses;
-
-public class PoolServiceResponse
-{
-    public string Status { get; set; }
-}

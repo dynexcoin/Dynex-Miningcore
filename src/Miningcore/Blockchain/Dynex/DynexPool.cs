@@ -46,8 +46,6 @@ public class DynexPool : PoolBase
     private string minerAlgo;
     public BlockchainStats BlockchainStats { get; } = new();
 
-    
-
     private async Task OnLoginAsync(StratumConnection connection, Timestamped<JsonRpcRequest> tsRequest)
     {
         var request = tsRequest.Value;
@@ -71,14 +69,23 @@ public class DynexPool : PoolBase
         if(networkHashrate > 0 && poolHashrate >= hashrateLimit)
            throw new StratumException(StratumError.MinusOne, "Pool hashrate too high, please use another pool");
 
-
         // extract worker/miner/paymentid
         var split = loginRequest.Login.Split('.');
         context.Miner = split[0].Trim();
-        context.Worker = split.Length > 1 ? split[1].Trim() : null;
+        context.Worker = split.Length > 1 ? split[1].Trim() : loginRequest?.Password;
         context.UserAgent = loginRequest.UserAgent?.Trim();
         context.requestId = requestId;
 
+        // mallobless
+        if(string.IsNullOrEmpty(loginRequest?.MallobId))
+            throw new StratumException(StratumError.Other, "missing mallob id");
+
+        context.Mallob = loginRequest.MallobId?.Trim();
+        context.Algo = loginRequest.Algo?.Trim();
+
+        if(context.Algo != "dynexsolve235")
+           throw new StratumException(StratumError.Other, "Incorrect algo");
+        
         var addressToValidate = context.Miner;
 
         // extract paymentid
@@ -296,6 +303,48 @@ public class DynexPool : PoolBase
         }
     }
 
+    private async Task OnMallobAsync(StratumConnection connection, Timestamped<JsonRpcRequest> tsRequest, CancellationToken ct)
+    {
+        var request = tsRequest.Value;
+        var context = connection.ContextAs<DynexWorkerContext>();
+
+        try
+        {
+            // validate worker
+            if(!context.IsAuthorized)
+                throw new StratumException(StratumError.MinusOne, "unauthorized");
+
+            if(request.Id == null)
+                throw new StratumException(StratumError.MinusOne, "missing request id");
+
+            // check request
+            var mallobRequest = request.ParamsAs<DynexMallobRequest>();
+
+            // call mallob
+            var resultValue = await manager.SubmitMallobAsync(connection, mallobRequest, ct);
+
+            var response = new DynexMallobResponse
+            {
+                Mallob = new DynexMallobParams()
+            };
+            response.Mallob.Payload = resultValue;
+
+            await connection.RespondAsync(response, request.Id);
+        }
+        catch(StratumException ex)
+        {
+            // telemetry
+            PublishTelemetry(TelemetryCategory.RpcRequest, clock.Now - tsRequest.Timestamp.UtcDateTime, false);
+
+            logger.Info(() => $"[{connection.ConnectionId}] Mallob Error: {ex.Message} [{context.Miner}.{context.Worker}]");
+
+            // banning
+            ConsiderBan(connection, context, poolConfig.Banning);
+
+            throw;
+        }
+    }
+
     private string NextJobId()
     {
         return Interlocked.Increment(ref currentJobId).ToString(CultureInfo.InvariantCulture);
@@ -386,6 +435,10 @@ public class DynexPool : PoolBase
 
                 case DynexStratumMethods.Submit:
                     await OnSubmitAsync(connection, tsRequest, ct);
+                    break;
+
+                case DynexStratumMethods.Mallob:
+                    await OnMallobAsync(connection, tsRequest, ct);
                     break;
 
                 case DynexStratumMethods.KeepAlive:

@@ -15,6 +15,10 @@ public class DynexWorkerContext : WorkerContextBase
     /// </summary>
     public string Worker { get; set; }
 
+    public string Mallob { get; set; }
+
+    public string Algo { get; set; }
+
     public string requestId { get; set; }
 
     private List<DynexWorkerJob> validJobs { get; } = new();

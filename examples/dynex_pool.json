@@ -41,8 +41,8 @@
     "paymentProcessing": {
         "enabled": true,
         "interval": 100,
-        "shareRecoveryFile": "recovered-shares.txt"
     },
+    "shareRecoveryFile": "recovered-shares.txt",
     "api": {
         "enabled": true,
         "listenAddress": "*",
@@ -100,31 +100,32 @@
                 },
                 "NetworkTypeOverride": "mainnet",
                 "daemons": [
-                {
-                        "host": "127.0.0.1",
-                        "port": 18333,
-                        "user": "",
-                        "password": ""
-                },
-                {
-                        "host": "127.0.0.1",
-                        "port": 8070,
-                        "user": "",
-                        "password": "",
-                        "category": "wallet"
-                },
-                {
-                        "host": "poolservice.dynexcoin.org",
-                        "port": 8080,
-                        "category": "poolservice"
-                }
+                    {
+                            "host": "127.0.0.1",
+                            "port": 18333,
+                            "user": "",
+                            "password": ""
+                    },
+                    {
+                            "host": "127.0.0.1",
+                            "port": 8070,
+                            "user": "",
+                            "password": "",
+                            "category": "wallet"
+                    },
+                    {
+                            "host": "poolservice.dynexcoin.org",
+                            "port": 8080,
+                            "user": "",
+                            "password": "",
+                            "category": "poolservice"
+                    }
                 ],
-                "UUID": "POOL-UUID",
                 "paymentProcessing": {
                         "enabled": true,
                         "minimumPayment": 1.0,
                         "minimumPaymentToPaymentId": 1.0,
-                        "payoutScheme": "PPLNS", // PROP PPLNS SOLO supported
+                        "payoutScheme": "PPLNS",
                        "payoutSchemeConfig": { "factor": 2.0 }
                 }
         }
